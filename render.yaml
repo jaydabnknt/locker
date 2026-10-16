@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: timelock-cryptobot
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node index.js
+    healthCheckPath: /health
+    envVars:
+      - key: BOT_TOKEN
+        sync: false

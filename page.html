@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Time-Lock</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js"></script>
+<script src="https://unpkg.com/@solana/web3.js@1.98.0/lib/index.iife.min.js"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --bg2: var(--tg-theme-secondary-bg-color, #f2f3f5);
+    --text: var(--tg-theme-text-color, #16181d);
+    --hint: var(--tg-theme-hint-color, #6b7280);
+    --accent: var(--tg-theme-button-color, #2f6fed);
+    --accent-text: var(--tg-theme-button-text-color, #ffffff);
+    --danger: #d64545;
+    --ok: #1f9d55;
+    --radius: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-tg]) {
+      --bg: #121418; --bg2: #1c1f26; --text: #eceef2; --hint: #8b93a1; --accent: #5b8cff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 16px 16px calc(24px + env(safe-area-inset-bottom));
+  }
+  main { max-width: 480px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 4px 0 2px; }
+  .sub { color: var(--hint); font-size: 14px; margin: 0 0 16px; }
+  .card { background: var(--bg2); border-radius: var(--radius); padding: 14px; margin-bottom: 12px; }
+  label { display: block; font-size: 13px; color: var(--hint); margin: 10px 0 6px; }
+  label:first-child { margin-top: 0; }
+  input, select {
+    width: 100%; font: inherit; color: var(--text); background: var(--bg);
+    border: 1px solid color-mix(in srgb, var(--hint) 35%, transparent);
+    border-radius: 10px; padding: 11px 12px; outline: none;
+  }
+  input:focus, select:focus { border-color: var(--accent); }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .chip {
+    border: 1px solid color-mix(in srgb, var(--hint) 35%, transparent); background: transparent;
+    color: var(--text); border-radius: 999px; padding: 5px 11px; font-size: 13px; cursor: pointer;
+  }
+  .chip.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button.primary, a.btn {
+    display: block; width: 100%; text-align: center; text-decoration: none;
+    background: var(--accent); color: var(--accent-text); border: 0; border-radius: 12px;
+    padding: 13px; font: 600 16px/1.2 inherit; font-family: inherit; cursor: pointer; margin-top: 10px;
+  }
+  button.secondary {
+    width: 100%; background: transparent; color: var(--accent); border: 1px solid var(--accent);
+    border-radius: 12px; padding: 11px; font: 600 15px inherit; font-family: inherit; cursor: pointer; margin-top: 8px;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  .kv { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; font-size: 15px; }
+  .kv span:first-child { color: var(--hint); }
+  .kv span:last-child { text-align: right; word-break: break-all; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  .warn { font-size: 14px; color: var(--hint); display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; }
+  .warn input { width: auto; margin-top: 3px; }
+  #status { font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+  #status.err { color: var(--danger); }
+  #status.ok { color: var(--ok); }
+  #status a { color: var(--accent); }
+  .hidden { display: none !important; }
+  .small { font-size: 13px; color: var(--hint); }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title">Time-Lock</h1>
+  <p class="sub" id="subtitle">Loading…</p>
+
+  <!-- Shown when no wallet is injected (e.g. inside Telegram) -->
+  <section id="openInWallet" class="card hidden">
+    <div style="font-weight:600;margin-bottom:4px">Open in your wallet app</div>
+    <div class="small">Telegram can't talk to wallet extensions directly. Open this page inside your wallet's built-in browser to sign — your keys never leave the wallet.</div>
+    <div id="walletLinks"></div>
+    <button class="secondary" id="copyLink">Copy page link</button>
+  </section>
+
+  <section id="walletCard" class="card hidden">
+    <div class="kv"><span>Wallet</span><span id="walletAddr" class="mono">not connected</span></div>
+    <button class="primary" id="connectBtn">Connect wallet</button>
+  </section>
+
+  <!-- LOCK -->
+  <section id="lockView" class="card hidden">
+    <label for="tokenMode">Asset</label>
+    <select id="tokenMode"></select>
+    <div id="tokenAddrWrap" class="hidden">
+      <label for="tokenAddr" id="tokenAddrLabel">Token address</label>
+      <input id="tokenAddr" class="mono" placeholder="0x…" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="small" id="tokenInfo" style="margin-top:6px"></div>
+
+    <label for="amount">Amount</label>
+    <div class="row">
+      <input id="amount" inputmode="decimal" placeholder="0.0" autocomplete="off">
+      <button class="chip" id="maxBtn" style="flex:0 0 auto">Max</button>
+    </div>
+
+    <label for="unlockAt">Unlock date &amp; time (your local time)</label>
+    <input id="unlockAt" type="datetime-local">
+    <div class="chips" id="quick"></div>
+
+    <div class="warn"><input type="checkbox" id="ack"><span id="ackText">I understand these funds can't be withdrawn by anyone — including me — before the unlock time.</span></div>
+    <button class="primary" id="lockBtn" disabled>Lock</button>
+  </section>
+
+  <!-- WITHDRAW -->
+  <section id="withdrawView" class="card hidden">
+    <div id="lockDetails"></div>
+    <button class="primary" id="withdrawBtn" disabled>Withdraw</button>
+  </section>
+
+  <section class="card"><div id="status">Ready.</div></section>
+  <p class="small">Non-custodial: you sign every transaction in your own wallet. Contract source is open — check the address before signing.</p>
+</main>
+
+<script>
+"use strict";
+// ---------------------------------------------------------------- setup
+const tg = window.Telegram?.WebApp;
+if (tg && tg.initData) {
+  document.documentElement.dataset.tg = "1";
+  tg.ready(); tg.expand();
+}
+const $ = (id) => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const NET = params.get("net");
+const ACTION = params.get("action") || "lock";
+
+let CFG, net, isSolana = false;
+const state = { account: null, provider: null, signer: null, token: null };
+
+function setStatus(html, cls = "") {
+  const s = $("status");
+  s.className = cls;
+  s.innerHTML = html;
+}
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const short = (a) => (a && a.length > 14 ? a.slice(0, 6) + "…" + a.slice(-4) : a);
+const errMsg = (e) => e?.shortMessage || e?.info?.error?.message || e?.message || String(e);
+
+function openExternal(url) {
+  if (tg && tg.initData) tg.openLink(url); else location.href = url;
+}
+
+function parseUnits(str, decimals) {
+  str = String(str).trim().replace(",", ".");
+  if (!/^\d*\.?\d*$/.test(str) || str === "" || str === ".") throw new Error("Enter a valid amount");
+  let [i, f = ""] = str.split(".");
+  if (f.length > decimals) throw new Error(`Too many decimal places (max ${decimals})`);
+  return BigInt((i || "0") + f.padEnd(decimals, "0"));
+}
+function formatUnits(v, decimals) {
+  const s = v.toString().padStart(decimals + 1, "0");
+  const i = s.slice(0, s.length - decimals) || "0";
+  const f = decimals ? s.slice(s.length - decimals).replace(/0+$/, "") : "";
+  return f ? `${i}.${f}` : i;
+}
+
+// ---------------------------------------------------------------- boot
+(async function boot() {
+  try {
+    CFG = await (await fetch("config.json", { cache: "no-store" })).json();
+  } catch {
+    return setStatus("Couldn't load config.json", "err");
+  }
+  if (NET === "solana") {
+    net = CFG.solana; isSolana = true;
+  } else {
+    net = CFG.evm.find((c) => c.key === NET);
+  }
+  if (!net) return setStatus("Unknown network. Open this page from the bot's /lock or /locks buttons.", "err");
+
+  $("title").textContent = ACTION === "withdraw" ? "Withdraw" : "Lock tokens";
+  $("subtitle").textContent = `${net.name} · contract ${short(isSolana ? net.programId : net.locker)}`;
+
+  const injected = isSolana ? solanaProvider() : window.ethereum;
+  if (!injected) {
+    showOpenInWallet();
+    setStatus("Open this page in your wallet app to continue.");
+    return;
+  }
+  $("walletCard").classList.remove("hidden");
+  $("connectBtn").onclick = () => connect().catch((e) => setStatus(errMsg(e), "err"));
+  if (ACTION === "withdraw") setupWithdraw(); else setupLock();
+  setStatus("Connect your wallet to continue.");
+})();
+
+function showOpenInWallet() {
+  const here = location.href;
+  const noProto = here.replace(/^https?:\/\//, "");
+  const links = isSolana
+    ? [
+        ["Open in Phantom", `https://phantom.app/ul/browse/${encodeURIComponent(here)}?ref=${encodeURIComponent(location.origin)}`],
+        ["Open in Solflare", `https://solflare.com/ul/v1/browse/${encodeURIComponent(here)}?ref=${encodeURIComponent(location.origin)}`],
+      ]
+    : [
+        ["Open in MetaMask", `https://metamask.app.link/dapp/${noProto}`],
+        ["Open in Trust Wallet", `https://link.trustwallet.com/open_url?coin_id=60&url=${encodeURIComponent(here)}`],
+        ["Open in Coinbase Wallet", `https://go.cb-w.com/dapp?cb_url=${encodeURIComponent(here)}`],
+      ];
+  const box = $("walletLinks");
+  for (const [label, url] of links) {
+    const b = document.createElement("button");
+    b.className = "primary"; b.textContent = label;
+    b.onclick = () => openExternal(url);
+    box.appendChild(b);
+  }
+  $("copyLink").onclick = async () => {
+    try { await navigator.clipboard.writeText(here); setStatus("Link copied — paste it into your wallet's browser.", "ok"); }
+    catch { prompt("Copy this link:", here); }
+  };
+  $("openInWallet").classList.remove("hidden");
+}
+
+// ---------------------------------------------------------------- wallet
+function solanaProvider() {
+  return window.phantom?.solana || window.solflare || window.backpack?.solana || window.solana || null;
+}
+
+async function connect() {
+  if (isSolana) {
+    const p = solanaProvider();
+    const r = await p.connect();
+    state.provider = p;
+    state.account = (r?.publicKey || p.publicKey).toString();
+    state.conn = new solanaWeb3.Connection(net.publicRpc, "confirmed");
+  } else {
+    const bp = new ethers.BrowserProvider(window.ethereum);
+    await bp.send("eth_requestAccounts", []);
+    await ensureChain();
+    state.provider = new ethers.BrowserProvider(window.ethereum); // fresh after chain switch
+    state.signer = await state.provider.getSigner();
+    state.account = await state.signer.getAddress();
+    window.ethereum.on?.("chainChanged", () => location.reload());
+    window.ethereum.on?.("accountsChanged", () => location.reload());
+  }
+  $("walletAddr").textContent = short(state.account);
+  $("connectBtn").classList.add("hidden");
+  setStatus("Wallet connected.", "ok");
+  if (ACTION === "withdraw") await loadWithdraw(); else await refreshToken();
+}
+
+async function ensureChain() {
+  const want = "0x" + Number(net.chainId).toString(16);
+  const have = await window.ethereum.request({ method: "eth_chainId" });
+  if (have.toLowerCase() === want) return;
+  try {
+    await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: want }] });
+  } catch (e) {
+    if (e.code === 4902 && net.publicRpc) {
+      await window.ethereum.request({
+        method: "wallet_addEthereumChain",
+        params: [{ chainId: want, chainName: net.name, rpcUrls: [net.publicRpc],
+          nativeCurrency: { name: net.nativeSymbol, symbol: net.nativeSymbol, decimals: 18 },
+          blockExplorerUrls: net.explorer ? [net.explorer] : [] }],
+      });
+    } else {
+      throw new Error(`Please switch your wallet to ${net.name}.`);
+    }
+  }
+}
+
+// ---------------------------------------------------------------- EVM
+const ERC20_ABI = [
+  "function decimals() view returns (uint8)",
+  "function symbol() view returns (string)",
+  "function balanceOf(address) view returns (uint256)",
+  "function allowance(address,address) view returns (uint256)",
+  "function approve(address,uint256) returns (bool)",
+];
+const LOCKER_ABI = [
+  "function lockToken(address token, uint256 amount, uint64 unlockTime) returns (uint256)",
+  "function lockNative(uint64 unlockTime) payable returns (uint256)",
+  "function withdraw(uint256 lockId)",
+  "function locks(uint256) view returns (address owner, address token, uint128 amount, uint64 unlockTime, bool withdrawn)",
+  "event Locked(uint256 indexed lockId, address indexed owner, address indexed token, uint256 amount, uint64 unlockTime)",
+];
+const evmTx = (h) => net.explorer ? `<a href="${esc(net.explorer)}/tx/${esc(h)}" target="_blank" rel="noopener">${short(h)}</a>` : esc(h);
+
+// ---------------------------------------------------------------- Solana
+const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+const TOKEN_2022 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+const ATA_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
+const WSOL = "So11111111111111111111111111111111111111112";
+const DISC = { lock: "1513d02bed3eff57", withdraw: "b712469c946da122" };
+const hex = (h) => Uint8Array.from(h.match(/../g).map((b) => parseInt(b, 16)));
+const enc = (s) => new TextEncoder().encode(s);
+function u64(v, signed = false) {
+  const b = new Uint8Array(8);
+  const dv = new DataView(b.buffer);
+  signed ? dv.setBigInt64(0, BigInt(v), true) : dv.setBigUint64(0, BigInt(v), true);
+  return b;
+}
+const concat = (...arrs) => { const out = new Uint8Array(arrs.reduce((n, a) => n + a.length, 0)); let o = 0; for (const a of arrs) { out.set(a, o); o += a.length; } return out; };
+const PK = (s) => new solanaWeb3.PublicKey(s);
+const solTx = (sig) => `<a href="${esc(net.explorer)}/tx/${esc(sig)}${net.cluster === "devnet" ? "?cluster=devnet" : ""}" target="_blank" rel="noopener">${short(sig)}</a>`;
+
+function ata(owner, mint, tokenProgram) {
+  return solanaWeb3.PublicKey.findProgramAddressSync(
+    [PK(owner).toBytes(), PK(tokenProgram).toBytes(), PK(mint).toBytes()], PK(ATA_PROGRAM))[0];
+}
+function lockPdas(owner, lockId) {
+  const program = PK(net.programId);
+  const [lock] = solanaWeb3.PublicKey.findProgramAddressSync([enc("lock"), PK(owner).toBytes(), u64(lockId)], program);
+  const [vault] = solanaWeb3.PublicKey.findProgramAddressSync([enc("vault"), lock.toBytes()], program);
+  return { lock, vault };
+}
+async function solMintInfo(mint) {
+  const info = await state.conn.getAccountInfo(PK(mint));
+  if (!info) throw new Error("Mint not found on " + net.name);
+  const prog = info.owner.toString();
+  if (prog !== TOKEN_PROGRAM && prog !== TOKEN_2022) throw new Error("That address isn't a token mint");
+  return { decimals: info.data[44], tokenProgram: prog };
+}
+async function sendSol(instructions) {
+  const owner = PK(state.account);
+  const { blockhash, lastValidBlockHeight } = await state.conn.getLatestBlockhash();
+  const tx = new solanaWeb3.Transaction({ feePayer: owner, blockhash, lastValidBlockHeight });
+  tx.add(...instructions);
+  let sig;
+  if (state.provider.signAndSendTransaction) {
+    const r = await state.provider.signAndSendTransaction(tx);
+    sig = r.signature || r;
+  } else {
+    const signed = await state.provider.signTransaction(tx);
+    sig = await state.conn.sendRawTransaction(signed.serialize());
+  }
+  setStatus(`Sent ${solTx(sig)} — confirming…`);
+  const res = await state.conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
+  if (res.value.err) throw new Error("Transaction failed: " + JSON.stringify(res.value.err));
+  return sig;
+}
+const ix = (programId, keys, data) => new solanaWeb3.TransactionInstruction({
+  programId: PK(programId), data,
+  keys: keys.map(([k, s, w]) => ({ pubkey: typeof k === "string" ? PK(k) : k, isSigner: s, isWritable: w })),
+});
+const createAtaIx = (payer, ataAddr, owner, mint, tokenProgram) => ix(ATA_PROGRAM, [
+  [payer, true, true], [ataAddr, false, true], [owner, false, false], [mint, false, false],
+  [solanaWeb3.SystemProgram.programId, false, false], [tokenProgram, false, false],
+], Uint8Array.of(1)); // CreateIdempotent
+const syncNativeIx = (acc) => ix(TOKEN_PROGRAM, [[acc, false, true]], Uint8Array.of(17));
+const closeAccIx = (acc, owner) => ix(TOKEN_PROGRAM, [[acc, false, true], [owner, false, true], [owner, true, false]], Uint8Array.of(9));
+
+// ---------------------------------------------------------------- LOCK view
+function setupLock() {
+  $("lockView").classList.remove("hidden");
+  const native = isSolana ? "SOL" : net.nativeSymbol;
+  $("tokenMode").innerHTML = `<option value="native">${esc(native)} (native)</option><option value="token">Other token…</option>`;
+  $("tokenAddrLabel").textContent = isSolana ? "Token mint address" : "Token contract address";
+  $("tokenAddr").placeholder = isSolana ? "Mint address" : "0x…";
+  $("tokenMode").onchange = () => {
+    $("tokenAddrWrap").classList.toggle("hidden", $("tokenMode").value !== "token");
+    refreshToken();
+  };
+  $("tokenAddr").onchange = refreshToken;
+
+  const quick = [["1 week", 7], ["1 month", 30], ["3 months", 91], ["6 months", 182], ["1 year", 365]];
+  for (const [label, days] of quick) {
+    const c = document.createElement("button");
+    c.className = "chip"; c.textContent = label;
+    c.onclick = () => {
+      const d = new Date(Date.now() + days * 864e5);
+      d.setSeconds(0, 0);
+      $("unlockAt").value = new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 16);
+      document.querySelectorAll(".chip").forEach((x) => x.classList.toggle("on", x === c));
+      validate();
+    };
+    $("quick").appendChild(c);
+  }
+  ["amount", "unlockAt"].forEach((id) => $(id).addEventListener("input", validate));
+  $("ack").onchange = validate;
+  $("maxBtn").onclick = () => {
+    if (!state.token?.balance) return;
+    let bal = state.token.balance;
+    if (state.token.native) bal = bal > state.token.reserve ? bal - state.token.reserve : 0n; // leave gas
+    $("amount").value = formatUnits(bal, state.token.decimals);
+    validate();
+  };
+  $("lockBtn").onclick = () => doLock().catch((e) => { setStatus(errMsg(e), "err"); validate(); });
+}
+
+function unlockTs() {
+  const v = $("unlockAt").value;
+  return v ? Math.floor(new Date(v).getTime() / 1000) : NaN;
+}
+
+function validate() {
+  let ok = !!state.account && !!state.token && $("ack").checked;
+  const t = unlockTs();
+  const now = Date.now() / 1000;
+  if (!(t > now + 60) || t > now + 10 * 365 * 86400) ok = false;
+  try { if (state.token && parseUnits($("amount").value, state.token.decimals) <= 0n) ok = false; } catch { ok = false; }
+  if (Number.isFinite(t) && t > now) {
+    $("ackText").textContent = `I understand these funds can't be withdrawn by anyone — including me — before ${new Date(t * 1000).toLocaleString()}.`;
+  }
+  $("lockBtn").disabled = !ok;
+  if (ok) {
+    $("lockBtn").textContent = `Lock ${$("amount").value} ${state.token.symbol}`;
+  } else {
+    $("lockBtn").textContent = "Lock";
+  }
+}
+
+async function refreshToken() {
+  state.token = null;
+  $("tokenInfo").textContent = "";
+  validate();
+  if (!state.account) return;
+  const mode = $("tokenMode").value;
+  try {
+    if (isSolana) {
+      if (mode === "native") {
+        const lamports = BigInt(await state.conn.getBalance(PK(state.account)));
+        state.token = { native: true, mint: WSOL, symbol: "SOL", decimals: 9, tokenProgram: TOKEN_PROGRAM,
+          balance: lamports, reserve: 10_000_000n /* 0.01 SOL for rent + fees */ };
+      } else {
+        const mint = $("tokenAddr").value.trim();
+        if (!mint) return;
+        PK(mint);
+        const { decimals, tokenProgram } = await solMintInfo(mint);
+        const acc = ata(state.account, mint, tokenProgram);
+        let balance = 0n;
+        try { balance = BigInt((await state.conn.getTokenAccountBalance(acc)).value.amount); } catch {}
+        state.token = { native: false, mint, symbol: short(mint), decimals, tokenProgram, balance, account: acc };
+      }
+    } else {
+      if (mode === "native") {
+        const bal = await state.provider.getBalance(state.account);
+        state.token = { native: true, symbol: net.nativeSymbol, decimals: 18, balance: bal, reserve: ethers.parseEther("0.002") };
+      } else {
+        const addr = $("tokenAddr").value.trim();
+        if (!addr) return;
+        if (!ethers.isAddress(addr)) throw new Error("Not a valid token address");
+        const c = new ethers.Contract(addr, ERC20_ABI, state.provider);
+        const decimals = await c.decimals().catch(() => { throw new Error("That address doesn't look like an ERC-20 token on " + net.name + "."); });
+        const [symbol, balance] = await Promise.all([c.symbol().catch(() => short(addr)), c.balanceOf(state.account)]);
+        state.token = { native: false, address: ethers.getAddress(addr), symbol, decimals: Number(decimals), balance };
+      }
+    }
+    $("tokenInfo").textContent = `Balance: ${formatUnits(state.token.balance, state.token.decimals)} ${state.token.symbol}`;
+  } catch (e) {
+    $("tokenInfo").textContent = errMsg(e);
+  }
+  validate();
+}
+
+async function doLock() {
+  $("lockBtn").disabled = true;
+  const t = state.token;
+  const amount = parseUnits($("amount").value, t.decimals);
+  const until = unlockTs();
+  if (amount > t.balance) throw new Error("Amount is more than your balance");
+
+  if (isSolana) {
+    const owner = state.account;
+    const lockId = BigInt(Date.now());
+    const { lock, vault } = lockPdas(owner, lockId);
+    const ixs = [];
+    let ownerTokenAcc = t.account;
+    let closeAfter = false;
+    if (t.native) {
+      ownerTokenAcc = ata(owner, WSOL, TOKEN_PROGRAM);
+      closeAfter = !(await state.conn.getAccountInfo(ownerTokenAcc)); // only unwrap an account we created
+      ixs.push(createAtaIx(owner, ownerTokenAcc, owner, WSOL, TOKEN_PROGRAM));
+      ixs.push(solanaWeb3.SystemProgram.transfer({ fromPubkey: PK(owner), toPubkey: ownerTokenAcc, lamports: amount }));
+      ixs.push(syncNativeIx(ownerTokenAcc));
+    }
+    ixs.push(ix(net.programId, [
+      [owner, true, true], [t.mint, false, false], [ownerTokenAcc, false, true],
+      [lock, false, true], [vault, false, true], [t.tokenProgram, false, false],
+      [solanaWeb3.SystemProgram.programId, false, false],
+    ], concat(hex(DISC.lock), u64(lockId), u64(amount), u64(until, true))));
+    if (t.native && closeAfter) ixs.push(closeAccIx(ownerTokenAcc, owner));
+
+    setStatus("Confirm the transaction in your wallet…");
+    const sig = await sendSol(ixs);
+    setStatus(`✅ Locked ${formatUnits(amount, t.decimals)} ${esc(t.symbol)} until ${new Date(until * 1000).toLocaleString()}.\nLock #${lockId} · ${solTx(sig)}\n\nYou can close this page. The bot will remind you when it unlocks.`, "ok");
+  } else {
+    const locker = new ethers.Contract(net.locker, LOCKER_ABI, state.signer);
+    let tx;
+    if (t.native) {
+      setStatus("Confirm the lock in your wallet…");
+      tx = await locker.lockNative(until, { value: amount });
+    } else {
+      const token = new ethers.Contract(t.address, ERC20_ABI, state.signer);
+      const allowance = await token.allowance(state.account, net.locker);
+      if (allowance < amount) {
+        setStatus("Step 1/2: approve the locker to move exactly this amount…");
+        const a = await token.approve(net.locker, amount);
+        setStatus(`Approval sent ${evmTx(a.hash)} — waiting…`);
+        await a.wait();
+      }
+      setStatus("Step 2/2: confirm the lock in your wallet…");
+      tx = await locker.lockToken(t.address, amount, until);
+    }
+    setStatus(`Sent ${evmTx(tx.hash)} — waiting for confirmation…`);
+    const rc = await tx.wait();
+    let id = "?";
+    for (const log of rc.logs) {
+      try { const p = locker.interface.parseLog(log); if (p?.name === "Locked") id = p.args.lockId.toString(); } catch {}
+    }
+    setStatus(`✅ Locked ${formatUnits(amount, t.decimals)} ${esc(t.symbol)} until ${new Date(until * 1000).toLocaleString()}.\nLock #${id} · ${evmTx(tx.hash)}\n\nYou can close this page. The bot will remind you when it unlocks.`, "ok");
+  }
+  tg?.HapticFeedback?.notificationOccurred?.("success");
+}
+
+// ---------------------------------------------------------------- WITHDRAW view
+function setupWithdraw() {
+  $("withdrawView").classList.remove("hidden");
+  $("lockDetails").innerHTML = `<div class="kv"><span>Lock</span><span>#${esc(params.get("id") || "?")}</span></div>`;
+  $("withdrawBtn").onclick = () => doWithdraw().catch((e) => { setStatus(errMsg(e), "err"); $("withdrawBtn").disabled = false; });
+}
+
+async function loadWithdraw() {
+  const id = params.get("id");
+  if (!id || !/^\d+$/.test(id)) throw new Error("Missing lock id");
+  const now = Date.now() / 1000;
+  let rows, ready;
+  if (isSolana) {
+    const mint = params.get("mint");
+    const { lock } = lockPdas(state.account, BigInt(id));
+    const info = await state.conn.getAccountInfo(lock);
+    if (!info) throw new Error("This lock doesn't exist for the connected wallet (already withdrawn, or wrong wallet).");
+    const d = info.data;
+    const dv = new DataView(d.buffer, d.byteOffset, d.byteLength);
+    const lockMint = new solanaWeb3.PublicKey(d.slice(40, 72)).toString();
+    if (mint && mint !== lockMint) throw new Error("Lock mint mismatch.");
+    const { decimals, tokenProgram } = await solMintInfo(lockMint);
+    const amount = dv.getBigUint64(80, true);
+    const unlock = Number(dv.getBigInt64(88, true));
+    state.wd = { lockId: BigInt(id), mint: lockMint, tokenProgram, lock };
+    ready = now >= unlock;
+    rows = [["Lock", "#" + id], ["Token", lockMint === WSOL ? "SOL" : short(lockMint)], ["Amount", formatUnits(amount, decimals)], ["Unlocks", new Date(unlock * 1000).toLocaleString()]];
+  } else {
+    const locker = new ethers.Contract(net.locker, LOCKER_ABI, state.provider);
+    const l = await locker.locks(id);
+    if (l.owner.toLowerCase() !== state.account.toLowerCase()) throw new Error(`Lock #${id} belongs to ${short(l.owner)}, not the connected wallet.`);
+    let symbol = net.nativeSymbol, decimals = 18;
+    if (l.token !== ethers.ZeroAddress) {
+      const c = new ethers.Contract(l.token, ERC20_ABI, state.provider);
+      [decimals, symbol] = await Promise.all([c.decimals().then(Number), c.symbol().catch(() => short(l.token))]);
+    }
+    if (l.withdrawn) throw new Error("This lock was already withdrawn.");
+    ready = now >= Number(l.unlockTime);
+    rows = [["Lock", "#" + id], ["Amount", `${formatUnits(l.amount, decimals)} ${symbol}`], ["Unlocks", new Date(Number(l.unlockTime) * 1000).toLocaleString()]];
+  }
+  $("lockDetails").innerHTML = rows.map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join("");
+  $("withdrawBtn").disabled = !ready;
+  setStatus(ready ? "Unlocked — ready to withdraw." : "Still locked.", ready ? "ok" : "");
+}
+
+async function doWithdraw() {
+  $("withdrawBtn").disabled = true;
+  if (isSolana) {
+    const owner = state.account;
+    const w = state.wd;
+    const { vault } = lockPdas(owner, w.lockId);
+    const dest = ata(owner, w.mint, w.tokenProgram);
+    const unwrap = w.mint === WSOL && !(await state.conn.getAccountInfo(dest));
+    const ixs = [ix(net.programId, [
+      [owner, true, true], [w.mint, false, false], [w.lock, false, true], [vault, false, true],
+      [dest, false, true], [w.tokenProgram, false, false], [ATA_PROGRAM, false, false],
+      [solanaWeb3.SystemProgram.programId, false, false],
+    ], hex(DISC.withdraw))];
+    if (unwrap) ixs.push(closeAccIx(dest, owner)); // turn wSOL back into SOL
+    setStatus("Confirm the withdrawal in your wallet…");
+    const sig = await sendSol(ixs);
+    setStatus(`✅ Withdrawn. ${solTx(sig)}`, "ok");
+  } else {
+    const locker = new ethers.Contract(net.locker, LOCKER_ABI, state.signer);
+    setStatus("Confirm the withdrawal in your wallet…");
+    const tx = await locker.withdraw(params.get("id"));
+    setStatus(`Sent ${evmTx(tx.hash)} — waiting…`);
+    await tx.wait();
+    setStatus(`✅ Withdrawn. ${evmTx(tx.hash)}`, "ok");
+  }
+  tg?.HapticFeedback?.notificationOccurred?.("success");
+}
+</script>
+</body>
+</html>
