@@ -215,6 +215,7 @@ async function checkAlerts() {
 
 // ---------------- boot ----------------
 
+await store.init();
 startServer({ config, root });
 
 await tg.api("setMyCommands", {
@@ -244,7 +245,7 @@ for (const sig of ["SIGINT", "SIGTERM"]) {
   process.on(sig, () => {
     tg.stop();
     store.save();
-    process.exit(0);
+    store.flush().finally(() => process.exit(0));
   });
 }
 
