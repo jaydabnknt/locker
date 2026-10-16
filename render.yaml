@@ -13,3 +13,7 @@ services:
         sync: false
       - key: UPSTASH_REDIS_REST_TOKEN
         sync: false
+      - key: XRP_SEED
+        sync: false
+      - key: ADMIN_CHAT_ID
+        sync: false

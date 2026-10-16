@@ -1,17 +1,11 @@
 {
-  "port": 8080,
-  "dataFile": "data/store.json",
-  "checkIntervalMinutes": 5,
-  "evm": [
-    {
-      "key": "sepolia",
-      "name": "Sepolia (testnet)",
-      "chainId": 11155111,
-      "rpc": "https://ethereum-sepolia-rpc.publicnode.com",
-      "publicRpc": "https://ethereum-sepolia-rpc.publicnode.com",
-      "locker": "0x6fadc17a33b4c8a5e0ffe0ace439e8e6fad830a3",
-      "explorer": "https://sepolia.etherscan.io",
-      "nativeSymbol": "ETH"
-    }
-  ]
+  "network": "testnet",
+  "xrp": {
+    "rpc": "https://s.altnet.rippletest.net:51234",
+    "explorer": "https://testnet.xrpl.org",
+    "faucet": "https://faucet.altnet.rippletest.net/accounts"
+  },
+  "minLockXrp": 1,
+  "depositWindowHours": 24,
+  "pollSeconds": 15
 }

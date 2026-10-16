@@ -4,5 +4,6 @@
   "private": true,
   "type": "module",
   "engines": { "node": ">=20" },
-  "scripts": { "start": "node index.js" }
+  "scripts": { "start": "node index.js",
+    "test": "node --test test/xrpl.test.js" }
 }
